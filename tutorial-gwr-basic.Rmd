@@ -1,0 +1,182 @@
+---
+title: Basic GWR 模型
+---
+
+本文主要介绍函数 `gwr_basic()` 的用法。
+
+```{r setup, include=FALSE}
+library(sf)
+library(GWmodel3)
+```
+
+# 模型解算
+
+我们以示例数据 `LondonHP` 为例，展示函数 `gwr_basic()` 的用法。
+假设我们以 `PURCHASE` 为因变量，`FLOORSZ` 和 `UNEMPLOY` 为自变量，可以使用下面的方式构建 GWR 模型。
+
+```{r, cache=T}
+data(LondonHP)
+m1 <- gwr_basic(
+    formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+    data = LondonHP,
+    bw = 64,
+    adaptive = TRUE
+)
+m1
+```
+
+与 **GWmodel** 相比，用法主要发生了以下变动：
+
+1. 函数名从 `gwr.basic` 改为 `gwr_basic` ，这是为了避免新旧版本包函数名称出现冲突，便于开发和测试。
+3. 该函数不再支持设置 `regression.points` 参数。该参数实现的功能将移到 `predict()` 函数中进行实现。
+4. 返回结果的展示发生了变化，去掉了线性回归的部分。
+主要是为了使用户可以更灵活地设置 `lm()` 的参数，并避免显示信息过长导致不利于在 Jupyter 等环境中使用。
+
+该函数返回一个 `gwrm` 的对象，通过控制台输出信息，我们可以得到
+调用的表达式、数据、带宽、核函数、系数估计值的统计、诊断信息。
+同样，也支持使用 `coef()` `fitted()` `residuals()` 等函数获取信息。
+
+```{r}
+head(coef(m1))
+head(fitted(m1))
+head(residuals(m1))
+```
+
+此外，与旧版 **GWmodel** 包类似，`gwrm` 对象中提供了一个 `$SDF` 变量保存了系数估计值等一系列局部结果。
+
+```{r}
+head(m1$SDF)
+```
+
+使用该变量，可以进行专题制图。除此之外，改包还提供了一个 `plot()` 函数，通过输入 `gwrm` 对象，可以快速查看回归系数。
+
+```{r}
+plot(m1)
+plot(m1, c("FLOORSZ", "UNEMPLOY"))
+```
+
+如果不传入第二个参数，则自动绘制所有回归系数。如果传入了第二个参数，那么仅绘制第二个参数列出的系数。
+
+# 带宽优选
+
+如果希望系统自动优选一个带宽，而不是手动设置带宽大小，可以使用下面的方式调用函数。
+
+```{r, cache=T}
+data(LondonHP)
+m <- gwr_basic(
+    formula = PURCHASE ~ FLOORSZ + UNEMPLOY,
+    data = LondonHP,
+    bw = "AIC",
+    adaptive = TRUE
+)
+message("Bandwidth:", m$args$bw)
+```
+
+带宽设置支持通过字符串 `"AIC"` 或 `"CV"` 设置带宽优选方法。此外，如果参数 `bw` 不存在，或设置为非数值型变量，
+程序也会根据 AIC 值自动优选带宽。用户不再需要调用单独的 `bw.gwr()` 函数手动优选带宽。
+
+> 进行这样改动的原因是：
+> 
+> 1. 内核库中优选完带宽后直接进行了模型解算，而不是返回带宽值，节省一些手动拟合模型的时间。
+> 2. 避免参数在不同函数中重复设置，导致出现错误，
+> 例如在 `bw.gwr()` 中将 `adaptive` 改成了 `FALSE`，但出于某些原因，忘记在 `gwr.basic()` 中同步修改，从而造成错误。
+> 3. 节省参数个数。因为带宽仅有指定、优选两种情况，因此可以根据 `bw` 的数据类型进行情况判断。
+> 当 `bw` 是数值型变量时（包括 `Inf`），说明带宽已经指定，此时无需进行带宽优选；
+> 当带宽需要优选时，又无法指定 `bw` 的具体值，因此可以用该参数表示带宽优选的指标类型。
+
+如果要获取优选的带宽值，则通过函数返回对象中的 `$args$bw` 变量获取，或者从控制台输出返回对象信息读出。
+
+# 模型优选
+
+该部分的改动也比较大。
+包中定义了一个 “Generic” 的函数 `model_sel()` （姑且称之为泛型函数），
+当其作用与 `gwrm` 对象上时，表示对该拟合得到的模型进行变量优选。
+其用法类似于 **MASS** 包中的 `stepAIC()` 函数。
+在实际使用中，用户一般都是先拟合一个变量较多的模型，然后从中进行变量优选。
+如果使用的是 R 4.1 及以上版本，原生支持 `|>` 管道运算符，可以使用如下调用方式
+
+```{r, cache=T}
+m2 <- gwr_basic(
+    PURCHASE ~ FLOORSZ + UNEMPLOY + PROF + BATH2 + BEDS2 + GARAGE1 +
+        TYPEDETCH + TPSEMIDTCH + TYPETRRD + TYPEBNGLW + BLDPWW1 +
+        BLDPOSTW + BLD60S + BLD70S + BLD80S + CENTHEAT,
+    LondonHP, "AIC", TRUE, parallel_method = "omp"
+) |> model_sel(criterion = "AIC", threshold = 10, bw = Inf, optim_bw = "AIC")
+m2
+```
+
+其中参数 `threshold` 表示指标值变化的阈值，由于目前内核库仅支持 AIC 指标选模型，因此参数 `criterion` 仅支持值 `"AIC"`。
+如果使用的是低版本的 R，那么可使用下面的模式进行调用：
+
+```r
+m2 <- gwr_basic(
+    PURCHASE ~ FLOORSZ + UNEMPLOY + PROF + BATH2 + BEDS2 + GARAGE1 +
+        TYPEDETCH + TPSEMIDTCH + TYPETRRD + TYPEBNGLW + BLDPWW1 +
+        BLDPOSTW + BLD60S + BLD70S + BLD80S + CENTHEAT,
+    LondonHP, "AIC", TRUE, parallel_method = "omp"
+)
+m2 <- model_sel(m2, criterion = "AIC", threshold = 10, bw = Inf, optim_bw = "AIC")
+m2
+```
+
+函数 `model_sel()` 中也有一个 `bw` 参数，同时也附加了一个 `optim_bw` 的参数。其用法是：
+
+1. 如果 `bw` 不设置或者是 `NA`，那么将采用传入的 `gwrm` 对象中记录的带宽值。
+2. 如果 `bw` 是数值型，使用该 `bw` 值作为模型优选中使用的带宽值。根据 `optim_bw` 的情况判断是否在解算前进行带宽优选。
+    - 如果 `optim_bw` 指定了 `"no"`，那么默认以 AIC 作为指标进行带宽优选。
+    - 如果 `optim_bw` 指定了 `"AIC"` 或 `"CV"`，那么以根据相应的指标进行带宽优选。
+3. 如果 `bw` 是非数值型值，则默认使用 `Inf` 值作为带宽进行变量优选，并在模型解算前，使用变量 `optim_bw` 指定的指标值进行变量优选。
+但如果 `optim_bw` 指定了 `"no"`，那么默认以 AIC 作为指标进行带宽优选。
+
+虽然该逻辑看起来比较复杂，但是使用起来很简单。一般情况下，就使用如上设置的参数即可。
+
+经过变量优选的模型返回值，包含一个与该函数同名的 `$model_sel` 变量，里面保存了模型优选过程中所有模型组合及其指标值。
+包中提供了三个函数用于可视化该变量。
+
+```{r}
+model_sel_view_circle(m2$model_sel, main = "Circle View")
+model_sel_view_value(m2$model_sel, main = "AIC Value")
+model_sel_view_diff(m2$model_sel, main = "Diff of AIC")
+```
+
+这三幅图分别为：
+
+1. 模型变量组合环形图。
+2. 模型指标值折线图。
+3. 模型指标值差分图。这个图是为了便于观察哪个模型符合阈值的要求。
+图中所展示的数据是每个模型的指标值与上一个模型的指标值相比的变化情况（除了第一个默认为0）。
+通过该图可以清晰地看到那些模型与上一个模型相比具有显著改进效果。
+
+除了直接调用这三个函数之外，还可以统一使用 `plot()` 函数，该函数会做一些布局上的调整，以方便出图。
+
+```{r}
+plot(m2$model_sel)                  # 等价于 model_sel_view_circle
+plot(m2$model_sel, view = "value")  # 等价于 model_sel_view_value
+plot(m2$model_sel, view = "diff")   # 等价于 model_sel_view_diff
+```
+
+如果想要进一步调整图片，可以直接添加其他被 `plot()` 函数支持的参数，例如图名 `main` 等。
+
+# 预测
+
+根据已有模型，GWR 可以在任意点的位置进行回归系数和预测。所需要用到的函数是 `predict()` 函数。
+我们这里直接使用原数据集进行预测。
+
+```{r}
+predict(m2, LondonHP)
+```
+
+根据传入的第二个参数的类型不同，该函数会给出不同的结果：
+
+- 如果第二个参数是一个 `sf` 或 `sfc` 类型对象，该函数返回一个 `sf` 或 `sfc` 类型的对象，
+其中包含了原始数据的几何信息。
+- 如果第二个参数只是一个两列的 `matrix` 或 `data.frame`，那么该函数返回一个 `data.frame` 对象，
+不包含几何信息，但与输入数据行数一致。
+
+此外，如果第二个参数是一个 `sf` 或 `sfc` 类型对象，返回值的内容会根据该参数中包含的数据变化：
+
+- 如果参数中不包含完整的自变量字段，那么仅返回系数估计值；
+- 如果参数中包含完整的自变量字段，但不包含因变量字段，除了返回系数估计值外还返回因变量估计值；
+- 如果参数中包含完整的自变量字段，也包含因变量字段，除了返回系数估计值外还返回因变量估计值和残差。
+
+这样可以根据不同的需求获取不同的结果。
