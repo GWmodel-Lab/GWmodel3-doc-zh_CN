@@ -9,6 +9,8 @@ navbar:
       menu:
       - text: "Basic GWR"
         href: tutorial-gwr-basic.html
+      - text: "Multiscale GWR"
+        href: tutorial-gwr-multiscale.html
 output:
   html_document:
     theme: paper
