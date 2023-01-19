@@ -12,7 +12,7 @@ library(GWmodel3)
 # 模型解算
 
 我们以示例数据 `LondonHP` 为例，展示函数 `gwr_basic()` 的用法。
-假设我们以 `PURCHASE` 为因变量，`FLOORSZ` 和 `UNEMPLOY` 为自变量，可以使用下面的方式构建 GWR 模型。
+假设我们以 `PURCHASE` 为因变量，`FLOORSZ`, `PROF` 和 `UNEMPLOY` 为自变量，可以使用下面的方式构建 GWR 模型。
 
 ```{r model-calibration, cache=T}
 data(LondonHP)
@@ -52,10 +52,10 @@ head(m1$SDF)
 
 ```{r plot-model}
 plot(m1)
-plot(m1, c("FLOORSZ", "UNEMPLOY"))
+plot(m1, columns = c("FLOORSZ", "UNEMPLOY"))
 ```
 
-如果不传入第二个参数，则自动绘制所有回归系数。如果传入了第二个参数，那么仅绘制第二个参数列出的系数。
+如果指定了 `columns` 参数，则仅绘制第二个参数列出的系数，否则绘制所有回归系数。
 
 # 带宽优选
 
