@@ -13,4 +13,3 @@ output:
   html_document:
     theme: paper
     css: style.css
-    keep_md: true
