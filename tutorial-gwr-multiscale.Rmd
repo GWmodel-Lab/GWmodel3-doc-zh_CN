@@ -26,16 +26,16 @@ library(GWmodel3)
 | `optim_bw`        | Character | 是否优选带宽以及带宽优选指标。如果值是 `"no"` 则不再进行带宽优选。否则根据指定的指标值进行优选。 |
 | `optim_threshold` | numeric   | 带宽优选阈值。                                                                                   |
 
-使用函数 `new_mgwr_config()` 可以直接构造一个对象。
+使用函数 `mgwr_config()` 可以直接构造一个对象。
 
 ```{r}
-new_mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC")
+mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC")
 ```
 
 该类型的对象也支持使用 `rep()` 函数复制，但支持持 `times` 参数。
 
 ```{r}
-rep(new_mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC"), 2)
+rep(mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC"), 2)
 ```
 
 # 模型解算
@@ -48,7 +48,7 @@ data(LondonHP)
 m1 <- gwr_multiscale(
  formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
  data = LondonHP,
- config = rep(new_mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC"), 4)
+ config = rep(mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC"), 4)
 )
 m1
 ```
