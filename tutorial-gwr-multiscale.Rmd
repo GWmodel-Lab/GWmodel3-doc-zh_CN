@@ -101,7 +101,7 @@ rep(mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC"), 2)
 如果要给所有变量统一设置加权配置项，可以传入只包含一个 `MGWRConfig` 类型对象的列表。
 例如，将所有变量的带宽类型设置为可变带宽，核函数设置为 Bi-square 核函数。
 
-```{r}
+```{r, cache=T}
 m2 <- gwr_multiscale(
  formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
  data = LondonHP,
@@ -127,7 +127,7 @@ m2 <- gwr_multiscale(
 
 如果分别设置加权配置项，则需要传入包含与自变量（如果有截距也包括截距）相同数量的 MGWRConfig 对象的列表。
 
-```{r}
+```{r, cache=T}
 m3 <- gwr_multiscale(
  formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
  data = LondonHP,

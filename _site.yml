@@ -15,3 +15,6 @@ output:
   html_document:
     theme: paper
     css: style.css
+    toc: true
+    toc_float:
+      collapsed: false
