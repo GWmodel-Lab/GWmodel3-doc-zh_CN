@@ -9,7 +9,61 @@ library(sf)
 library(GWmodel3)
 ```
 
-# 多尺度加权配置选项
+# 基本用法
+
+我们以示例数据 `LondonHP` 为例，展示函数 `gwr_multiscale()` 的用法。
+假设我们以 `PURCHASE` 为因变量，`FLOORSZ`, `PROF` 和 `UNEMPLOY` 为自变量，可以使用下面的方式构建多尺度 GWR 模型。
+
+```{r model-calibration, cache=T}
+data(LondonHP)
+m1 <- gwr_multiscale(
+ formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+ data = LondonHP
+)
+m1
+```
+
+这里展示的是在不进一步设置变量的情况下调用函数，函数默认以如下配置设置算法
+
+- 无初始带宽
+- 非可变带宽
+- 高斯核函数
+- 非地理坐标系
+- 欧氏距离度量
+- 中心化非截距变量
+- 根据 AIC 值优选带宽
+- 带宽优选收敛阈值为 $10^{-5}$
+
+大多数情况下，这样设置可以保证算法能够运行。如需进一步定制参数，请参考[加权配置](#加权配置)
+
+该函数返回一个 `gwrmultiscalem` 的对象，通过控制台输出信息，我们可以得到
+调用的表达式、数据、带宽、核函数、系数估计值的统计、诊断信息。
+同样，也支持使用 `coef()` `fitted()` `residuals()` 等函数获取信息。
+
+```{r coef-fitted-resi}
+head(coef(m1))
+head(fitted(m1))
+head(residuals(m1))
+```
+
+此外，与旧版 **GWmodel** 包类似，`gwrmultiscalem` 对象中提供了一个 `$SDF` 变量保存了系数估计值等一系列局部结果。
+
+```{r sdf}
+head(m1$SDF)
+```
+
+使用该变量，可以进行专题制图。除此之外，改包还提供了一个 `plot()` 函数，通过输入 `gwrmultiscalem` 对象，可以快速查看回归系数。
+
+```{r plot-model}
+plot(m1)
+plot(m1, columns = c("FLOORSZ", "UNEMPLOY"))
+```
+
+如果指定了 `columns` 参数，则仅绘制第二个参数列出的系数，否则绘制所有回归系数。
+
+# 加权配置
+
+## 多尺度加权配置选项
 
 包中定义了一个 `MGWRConfig` 的 S4 类型，用于提供多尺度加权配置的设置。
 该类型的对象包含以下几个成员：
@@ -38,42 +92,51 @@ mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC")
 rep(mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC"), 2)
 ```
 
-# 模型解算
+## 使用 MGWRConfig 进行参数配置
 
-我们以示例数据 `LondonHP` 为例，展示函数 `gwr_multiscale()` 的用法。
-假设我们以 `PURCHASE` 为因变量，`FLOORSZ`, `PROF` 和 `UNEMPLOY` 为自变量，可以使用下面的方式构建多尺度 GWR 模型。
+函数 `gwr_multiscale()` 既可以统一设置加权配置项，也可以分别设置加权配置项。
 
-```{r model-calibration, cache=T}
-data(LondonHP)
-m1 <- gwr_multiscale(
+### 统一设置
+
+如果要给所有变量统一设置加权配置项，可以传入只包含一个 `MGWRConfig` 类型对象的列表。
+例如，将所有变量的带宽类型设置为可变带宽，核函数设置为 Bi-square 核函数。
+
+```{r}
+m2 <- gwr_multiscale(
  formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
  data = LondonHP,
- config = rep(mgwr_config(36, TRUE, "bisquare", optim_bw = "AIC"), 4)
+ config = list(mgwr_config(adaptive = TRUE, kernel = "bisquare"))
 )
-m1
+m2
 ```
 
-该函数返回一个 `gwrmultiscalem` 的对象，通过控制台输出信息，我们可以得到
-调用的表达式、数据、带宽、核函数、系数估计值的统计、诊断信息。
-同样，也支持使用 `coef()` `fitted()` `residuals()` 等函数获取信息。
+由于 `centered` 选项默认为 `TRUE`，因此函数在运行时，
+会自动将截距对应的加权配置项中的 `centered` 变量设置为 `FALSE` 以避免可能存在的问题。
 
-```{r coef-fitted-resi}
-head(coef(m1))
-head(fitted(m1))
-head(residuals(m1))
+同样的，也可以使用 `rep` 函数，但是要确保传入正确的 `times` 变量的值。
+
+```r
+m2 <- gwr_multiscale(
+ formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+ data = LondonHP,
+ config = rep(mgwr_config(adaptive = TRUE, kernel = "bisquare"), times = 4)
+)
 ```
 
-此外，与旧版 **GWmodel** 包类似，`gwrmultiscalem` 对象中提供了一个 `$SDF` 变量保存了系数估计值等一系列局部结果。
+### 分别设置
 
-```{r sdf}
-head(m1$SDF)
+如果分别设置加权配置项，则需要传入包含与自变量（如果有截距也包括截距）相同数量的 MGWRConfig 对象的列表。
+
+```{r}
+m3 <- gwr_multiscale(
+ formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+ data = LondonHP,
+ config = list(mgwr_config(bw = 92, adaptive = TRUE, kernel = "bisquare"),
+               mgwr_config(bw = 19, adaptive = TRUE, kernel = "bisquare"),
+               mgwr_config(bw = 51, adaptive = TRUE, kernel = "bisquare"),
+               mgwr_config(bw = 157, adaptive = TRUE, kernel = "bisquare"))
+)
+m3
 ```
 
-使用该变量，可以进行专题制图。除此之外，改包还提供了一个 `plot()` 函数，通过输入 `gwrmultiscalem` 对象，可以快速查看回归系数。
-
-```{r plot-model}
-plot(m1)
-plot(m1, columns = c("FLOORSZ", "UNEMPLOY"))
-```
-
-如果指定了 `columns` 参数，则仅绘制第二个参数列出的系数，否则绘制所有回归系数。
+这样就可以通过使用 `c()` `rep()` 等函数的组合灵活设置每个变量的配置项。
