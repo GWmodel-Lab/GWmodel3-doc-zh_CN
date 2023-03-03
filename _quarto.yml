@@ -1,0 +1,31 @@
+project:
+  type: website
+
+website:
+  title: "GWmodel3"
+  # navbar:
+  #   left:
+  #     - text: Home
+  #       file: index.qmd
+  #     - text: Tutorial
+  #       menu:
+  #         - text: Basic GWR
+  #           file: tutorial-gwr-basic.qmd
+  #         - text: Multiscale GWR
+  #           file: tutorial-gwr-basic.qmd
+  sidebar:
+    style: "docked"
+    search: true
+    contents:
+      - text: 开始
+        file: index.qmd
+      - section: 教程
+        contents:
+          - tutorial-gwr-basic.qmd
+          - tutorial-gwr-multiscale.qmd
+
+format:
+  html:
+    theme: default
+    css: styles.css
+    toc: true
