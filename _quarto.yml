@@ -3,16 +3,6 @@ project:
 
 website:
   title: "GWmodel3"
-  # navbar:
-  #   left:
-  #     - text: Home
-  #       file: index.qmd
-  #     - text: Tutorial
-  #       menu:
-  #         - text: Basic GWR
-  #           file: tutorial-gwr-basic.qmd
-  #         - text: Multiscale GWR
-  #           file: tutorial-gwr-basic.qmd
   sidebar:
     style: "docked"
     search: true
@@ -27,5 +17,5 @@ website:
 format:
   html:
     theme: default
-    css: styles.css
     toc: true
+    lang: zh
