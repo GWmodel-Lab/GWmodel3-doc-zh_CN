@@ -13,6 +13,7 @@ website:
         contents:
           - tutorial-gwr-basic.qmd
           - tutorial-gwr-multiscale.qmd
+          - tutorial-gwdr.qmd
 
 format:
   html:

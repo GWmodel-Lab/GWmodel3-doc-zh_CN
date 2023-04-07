@@ -1,0 +1,203 @@
+---
+title: GWDR 模型
+---
+
+GWDR 模型即“地理加权密度回归模型”，其原理是对每个坐标维度分别进行加权，使用总权重进行加权回归。
+本文主要介绍函数 `gwdr()` 的用法。
+
+```{r setup, include=FALSE}
+library(sf)
+library(GWmodel3)
+```
+
+# 基本用法
+
+我们以示例数据 `LondonHP` 为例，展示函数 `gwdr()` 的用法。
+假设我们以 `PURCHASE` 为因变量，`FLOORSZ`, `PROF` 和 `UNEMPLOY` 为自变量，可以使用下面的方式构建 GWDR 模型。
+
+```{r model-calibration, cache=T}
+data(LondonHP)
+m1 <- gwdr(
+ formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+ data = LondonHP
+)
+m1
+```
+
+这里展示的是在不进一步设置变量的情况下调用函数，函数默认以如下配置设置算法
+
+- 每个维度的带宽大小为 61.8% 样本数
+- 每个维度都采用可变带宽
+- 每个维度都采用高斯核函数
+- 不优选带宽
+
+大多数情况下，这样设置可以保证算法能够运行。如需进一步定制参数，请参考[加权配置](#加权配置)
+
+该函数返回一个 `gwdrm` 的对象，通过控制台输出信息，我们可以得到
+调用的表达式、数据、带宽、核函数、系数估计值的统计、诊断信息。
+同样，也支持使用 `coef()` `fitted()` `residuals()` 等函数获取信息。
+
+```{r coef-fitted-resi}
+head(coef(m1))
+head(fitted(m1))
+head(residuals(m1))
+```
+
+此外，与其他函数类似，`gwdrm` 对象中提供了一个 `$SDF` 变量保存了系数估计值等一系列局部结果。
+
+```{r sdf}
+head(m1$SDF)
+```
+
+使用该变量，可以进行专题制图。除此之外，改包还提供了一个 `plot()` 函数，通过输入 `gwdrm` 对象，可以快速查看回归系数。
+
+```{r plot-model}
+plot(m1)
+plot(m1, columns = c("FLOORSZ", "UNEMPLOY"))
+```
+
+如果指定了 `columns` 参数，则仅绘制第二个参数列出的系数，否则绘制所有回归系数。
+
+# 加权配置
+
+## 每个维度的加权配置选项
+
+包中定义了一个 `GWDRConfig` 的 S4 类型，用于提供多尺度加权配置的设置。
+该类型的对象包含以下几个成员：
+
+| 名称       | 类型      | 说明             |
+| ---------- | --------- | ---------------- |
+| `bw`       | Numeric   | 带宽值。         |
+| `adaptive` | Logical   | 是否为可变带宽。 |
+| `kernel`   | Character | 核函数名称。     |
+
+使用函数 `gwdr_config()` 可以直接构造一个对象。
+
+```{r}
+gwdr_config(0.618, TRUE, "bisquare")
+```
+
+该类型的对象也支持使用 `rep()` 函数复制，但支持持 `times` 参数。
+
+```{r}
+rep(gwdr_config(36, TRUE, "bisquare"), 2)
+```
+
+## 使用 GWDRConfig 进行参数配置
+
+函数 `gwdr()` 既可以统一设置加权配置项，也可以分别设置加权配置项。
+
+### 统一设置
+
+如果要给所有维度统一设置加权配置项，可以传入只包含一个 `GWDRConfig` 类型对象的列表。
+例如，下面的代码将所有维度的带宽大小设置为 10% 样本数。
+
+```{r, cache=T}
+m2 <- gwdr(
+ formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+ data = LondonHP,
+ config = list(gwdr_config(0.2))
+)
+m2
+```
+
+同样的，也可以使用 `rep` 函数，但是要确保传入正确的 `times` 变量的值。
+
+```r
+m2 <- gwdr(
+ formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+ data = LondonHP,
+ config = rep(gwdr_config(0.2), times = 2)
+)
+```
+
+### 分别设置
+
+如果分别设置加权配置项，则需要传入包含与自变量（如果有截距也包括截距）相同数量的 GWDRConfig 对象的列表。
+
+```{r, cache=T}
+m3 <- gwdr(
+ formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+ data = LondonHP,
+ config = list(gwdr_config(bw = 0.2, kernel = "bisquare"),
+               gwdr_config(bw = 0.2, kernel = "bisquare"))
+)
+m3
+```
+
+这样就可以通过使用 `c()` `rep()` 等函数的组合灵活设置每个变量的配置项。
+
+# 带宽优选
+
+GWDR 模型的带宽优选必须要有一个初始值，所以即使让函数自动优选带宽，也要通过 `config` 参数指定带宽的类型和初始值。可以使用下面的方式启用带宽优选。
+
+```{r, cahce=T}
+m4 <- gwdr(
+    formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+    data = LondonHP,
+    optim_bw = "AIC"
+)
+```
+
+带宽设置支持通过字符串 `"AIC"` 或 `"CV"` 设置带宽优选方法。
+
+:::{.callout-important}
+如果 `config` 参数指定的带宽初始值不合适（过大或过小），程序会自动设置为默认的初始值：可变带宽情况下是 61.8% 样本数，固定带宽情况下是该维度下最大坐标差的 61.8%。
+:::
+
+# 模型优选
+
+使用 `model_sel()` 函数可以对 `gwdrm` 对象进行模型优选。
+如果使用的是 R 4.1 及以上版本，原生支持 `|>` 管道运算符，可以使用如下调用方式
+
+```{r model-selection, cache=T}
+m5 <- gwdr(
+    formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
+    data = LondonHP,
+    optim_bw = "AIC"
+) |> model_sel(criterion = "AIC", threshold = 10, optim_bw = "AIC")
+```
+
+其中参数 `threshold` 表示指标值变化的阈值，由于目前内核库仅支持 AIC 指标选模型，因此参数 `criterion` 仅支持值 `"AIC"`。
+如果使用的是低版本的 R，那么可使用下面的模式进行调用：
+
+```{r, eval=FALSE}
+m5 <- gwdr(
+    PURCHASE ~ FLOORSZ + UNEMPLOY + PROF + BATH2 + BEDS2 + GARAGE1 +
+        TYPEDETCH + TPSEMIDTCH + TYPETRRD + TYPEBNGLW + BLDPWW1 +
+        BLDPOSTW + BLD60S + BLD70S + BLD80S + CENTHEAT,
+    LondonHP, optim_bw = "AIC"
+)
+m5 <- model_sel(m5, criterion = "AIC", threshold = 10, optim_bw = "AIC")
+m5
+```
+
+函数 `model_sel()` 中也可以设置 `config` 参数。如果不设置，则继承 `gwdrm` 对象中的带宽大小、带宽类型、核函数的设置。如果这里设置了，则覆盖原有设置。进一步地，如果制定了 `optim_bw` 参数，则在模型优选完成后再进行带宽优选。
+
+经过变量优选的模型返回值，包含一个与该函数同名的 `$model_sel` 变量，里面保存了模型优选过程中所有模型组合及其指标值。
+包中提供了三个函数用于可视化该变量。
+
+```{r model-selection-view}
+model_sel_view_circle(m5$model_sel, main = "Circle View")
+model_sel_view_value(m5$model_sel, main = "AIC Value")
+model_sel_view_diff(m5$model_sel, main = "Diff of AIC")
+```
+
+这三幅图分别为：
+
+1. 模型变量组合环形图。
+2. 模型指标值折线图。
+3. 模型指标值差分图。这个图是为了便于观察哪个模型符合阈值的要求。
+图中所展示的数据是每个模型的指标值与上一个模型的指标值相比的变化情况（除了第一个默认为0）。
+通过该图可以清晰地看到那些模型与上一个模型相比具有显著改进效果。
+
+除了直接调用这三个函数之外，还可以统一使用 `plot()` 函数，该函数会做一些布局上的调整，以方便出图。
+
+```{r model-selection-plot}
+plot(m5$model_sel)                  # 等价于 model_sel_view_circle
+plot(m5$model_sel, view = "value")  # 等价于 model_sel_view_value
+plot(m5$model_sel, view = "diff")   # 等价于 model_sel_view_diff
+```
+
+如果想要进一步调整图片，可以直接添加其他被 `plot()` 函数支持的参数，例如图名 `main` 等。
+
