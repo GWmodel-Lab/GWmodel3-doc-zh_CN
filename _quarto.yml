@@ -10,10 +10,7 @@ website:
       - text: 开始
         file: index.qmd
       - section: 教程
-        contents:
-          - tutorial-gwr-basic.qmd
-          - tutorial-gwr-multiscale.qmd
-          - tutorial-gwdr.qmd
+        contents: "tutorial/*"
 
 format:
   html:

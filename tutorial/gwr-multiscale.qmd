@@ -1,5 +1,6 @@
 ---
 title: Multiscale GWR 模型
+order: 2
 ---
 
 本文主要介绍函数 `gwr_multiscale()` 的用法。

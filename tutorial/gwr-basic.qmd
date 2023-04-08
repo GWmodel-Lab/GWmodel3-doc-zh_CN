@@ -1,5 +1,6 @@
 ---
 title: Basic GWR 模型
+order: 1
 ---
 
 本文主要介绍函数 `gwr_basic()` 的用法。
