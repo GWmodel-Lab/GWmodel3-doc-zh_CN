@@ -60,6 +60,6 @@ rsconnect/
 _site/
 site_libs/
 *.html
-*.md
+tutorial/*.md
 
 /.quarto/

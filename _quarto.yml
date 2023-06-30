@@ -11,6 +11,8 @@ website:
         file: index.qmd
       - section: 教程
         contents: "tutorial/*"
+      - section: 开发
+        contents: "contribute/*"
 
 format:
   html:

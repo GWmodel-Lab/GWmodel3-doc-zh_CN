@@ -1,0 +1,530 @@
+---
+title: 基本流程
+order: 1
+---
+
+**GWmodel3** 使用基于 **devtools** 的开发流程，
+请先确保安装了 **devtools** 及其依赖包。
+
+# 主要步骤
+
+1.  新建分支
+2.  添加模型
+3.  单元测试与包检查
+4.  推送分支，发起 Pull Request
+
+# 添加模型
+
+由于 **GWmodel3** 的主要目标是为 R 语言提供库 **libgwmodel** 的用户接口，
+因此主要计算功能需要首先在 **libgwmodel** 中实现，
+在 R 中只需要实现相应的调用接口即可。
+开发时，主要以算法（模型）为单位，逐步实现算法的各种功能。
+下面就以某回归分析算法 `gwr_basic` 为例，介绍如何进行向改包中添加模型。
+
+## 添加 C++ 代码
+
+首先在 `/src` 文件夹中新建一个文件 `gwr_basic.cpp`，在该文件中实现调用 **libgwmodel** 的代码。
+先引入一些常用的库。
+
+```cpp
+#include <Rcpp.h>
+#include <armadillo>
+#include "utils.h"
+#include "gwmodel.h"
+
+using namespace std;
+using namespace Rcpp;
+using namespace arma;
+using namespace gwm;
+```
+
+::: callout-important
+文件 `utils.h` 和 `utils.cpp` 提供了极为重要的在 Rcpp 对象、 armadillo 对象和 libgwmodel 对象之间进行转换的方法：
+
+- 矩阵 `arma::mat` <-> `Rcpp::NumericMatrix`
+- 向量 `arma::vec` <-> `Rcpp::NumericVector`
+- 诊断变量 `gwm::RegressionDiagnostic` -> `Rcpp::List`
+- 模型优选指标列表 `gwm::VariableCriterionList` -> `Rcpp::List`
+
+一定要记得包含该头文件。
+:::
+
+通常，一个回归模型主要有两个入口：fit 和 predict；一个多元分析算法通常有一个入口 run。
+对于 `gwr_basic` 则需要两个函数：`gwr_basic_fit()` 和 `gwr_basic_predict()`，这里以前者为例。
+首先声明该函数
+
+```cpp
+// [[Rcpp::export]]
+List gwr_basic_fit(
+    const NumericMatrix& x, const NumericVector& y, const NumericMatrix& coords,
+    double bw, bool adaptive, size_t kernel, 
+    bool longlat, double p, double theta,
+    bool hatmatrix, bool intercept,
+    size_t parallel_type, const IntegerVector& parallel_arg,
+    bool optim_bw, size_t optim_bw_criterion,
+    bool select_model, size_t select_model_criterion, size_t select_model_threshold
+);
+```
+
+::: callout-important
+函数声明前面的注释 `// [[Rcpp::export]]` 不可省略！
+否则该函数不会被导出。
+:::
+
+函数中具体需要哪些参数，需要参考 **libgwmodel** 相应的类型中有哪些 `set` 函数，
+需要为这些 `set` 函数一一设置参数。
+函数中需要返回的内容通常非常复杂，所以返回值设置为 `List` 类型。
+
+### 实参类型转换
+
+该函数的输入参数是从 R 的运行时环境中传入的，所有参数类型都是 `std` 或者 `Rcpp` 中的类型。
+这些类型是无法直接传入 **libgwmodel** 的函数进行运算的。
+因此，该函数主要做的工作是将 R 传来的参数转换为 **libgwmodel** 所需要的参数。
+
+::: callout-note
+没有直接使用 **RcppArmadillo** 的原因是，该包所提供的 **armadillo** 对象经过了修改，
+往往和直接使用 **armadillo** 包编译的 **libgwmodel** 中的参数类型不匹配。
+也就是说，虽然从 R 传来的参数类型是 `arma::mat` ，库 **libgwmodel** 中所需要的参数类型也是 `arma::mat`，
+但其具体的结构已经不同了，这就会导致从 R 中传来的参数无法在 **ligwmodel** 库中得到正确的值。
+所以必须直接绕过 **RcppArmadillo**，直接将 **Rcpp** 对象转换为 **armadillo** 对象。
+:::
+
+主要有几种情况：
+
+- 输入 `NumericMatrix` 或者 `NumericVector` 类型，需要 `arma::mat` 或者 `arma::vec`类型，
+  直接使用 `utils.h` 提供的 `myas()` 函数进行转换。
+- 输入整数，需要枚举值，可使用强制类型转换。
+- 输入 `IntegerVector` 类型，需要枚举值，可使用 `std::transform` 转换为 `std::vector<int>`。
+- 输入 `IntegerVector` 类型，需要整形数组，可使用 `Rcpp::as` 转换为 `std::vector<int>`。
+
+### 距离和权重
+
+由于 **libgwmodel** 使用 `Distance` 和 `Weight` 类型的指针作为空间权重配置，
+该函数中需要创建相应的指针，所需的参数也应由函数形参传入。
+目前函数设计模式依然沿用以前的版本。
+
+对于距离而言，使用下面的代码构造指针
+
+```cpp
+Distance* distance = nullptr;
+if (longlat)
+{
+    distance = new CRSDistance(true);
+}
+else
+{
+    if (p == 2.0 && theta == 0.0)
+    {
+        distance = new CRSDistance(false);
+    }
+    else
+    {
+        distance = new MinkwoskiDistance(p, theta);
+    }
+}
+```
+
+对于权重而言，目前只有一个带宽权重，即 `BandwidthWeight`，可以直接创建该类对象，
+
+```cpp
+BandwidthWeight bandwidth(bw, adaptive, BandwidthWeight::KernelFunctionType((size_t)kernel));
+```
+
+最后组合成一个 `SpatialWeight` 对象。
+
+```cpp
+SpatialWeight spatial(&bandwidth, distance);
+```
+
+### 调用算法
+
+参数转换完成后，可以构造算法对象，并执行算法。
+
+```cpp
+// Make Algorithm Object
+GWRBasic algorithm(mx, my, mcoords, spatial, hatmatrix, intercept);
+algorithm.setIsAutoselectIndepVars(select_model);
+algorithm.setIndepVarSelectionThreshold(select_model_threshold);
+algorithm.setIsAutoselectBandwidth(optim_bw);
+algorithm.setBandwidthSelectionCriterion(GWRBasic::BandwidthSelectionCriterionType(size_t(optim_bw_criterion)));
+switch (ParallelType(size_t(parallel_type)))
+{
+case ParallelType::SerialOnly:
+    algorithm.setParallelType(ParallelType::SerialOnly);
+    break;
+#ifdef _OPENMP
+case ParallelType::OpenMP:
+    algorithm.setParallelType(ParallelType::OpenMP);
+    algorithm.setOmpThreadNum(vpar_args[0]);
+    break;
+#endif
+default:
+    algorithm.setParallelType(ParallelType::SerialOnly);
+    break;
+}
+algorithm.fit();
+```
+
+### 构造返回值
+
+通常算法的结果由很多部分组成，因此返回值需要是一个 `Rcpp::List` 类型的对象，以包括这些不同类型的值。
+该类型对象可以通过 `List::create()` 函数进行创建，参数使用 `Name("name") = value` 的模式设置名称和值。
+
+```cpp
+mat betas = algorithm.betas();
+List result_list = List::create(
+    Named("betas") = mywrap(betas),
+    Named("betasSE") = mywrap(algorithm.betasSE()),
+    Named("sTrace") = mywrap(algorithm.sHat()),
+    Named("sHat") = mywrap(algorithm.s()),
+    Named("diagnostic") = mywrap(algorithm.diagnostic())
+);
+```
+
+::: callout-important
+如果要在 `Rcpp::List` 中保存 **armadillo** 对象，则需要使用 `mywrap()` 函数进行封装。
+:::
+
+此外，`Rcpp::List` 类型的对象还支持通过重载的 `[]` 运算符设置新的键值对，例如
+
+```cpp
+if (optim_bw)
+{
+    double bw_value = algorithm.spatialWeight().weight<BandwidthWeight>()->bandwidth();
+    result_list["bandwidth"] = wrap(bw_value);
+}
+if (select_model)
+{
+    vector<size_t> sel_vars = algorithm.selectedVariables();
+    result_list["variables"] = wrap(sel_vars);
+    result_list["model_sel_criterions"] = mywrap(algorithm.indepVarsSelectionCriterionList());
+    mat x = mx.cols(VariableForwardSelector::index2uvec(sel_vars, intercept));
+    result_list["fitted"] = mywrap(GWRBasic::Fitted(x, betas));
+}
+else
+{
+    result_list["fitted"] = mywrap(GWRBasic::Fitted(mx, betas));
+}
+```
+
+设置时同样需要使用 `mywrap` 函数进行包装。
+
+最后直接返回 `result_list` 即可。
+
+### 修改 Makevars
+
+为了使编译器能够编译该文件，需要将该文件添加到 `Makevars.in` 和 `Makevars.win` 的 `OBJECTS_GWMODEL` 宏中，如
+
+```diff
+OBJECTS_GWMODEL = \
+	utils.o \
++	gwr_basic.o \
+	RcppExports.o
+```
+
+注意一定要添加到 `RcppExports.o` 之前，`utils.o` 之后。
+
+## 生成 RcppExports
+
+使用 R 运行以下代码，生成 `RcppExports.cpp` 和 `RcppExports.R`。
+
+```R
+devtools::load_all()
+```
+
+生成的 `RcppExports.cpp` 和 `RcppExports.R` 就不要再进行修改了，否则会被覆盖掉。
+
+## 添加用户接口
+
+我们将使用 R 编写的供用户使用以调用 C++ 库构建模型的函数称为“用户接口”，也就是我们通常使用的 R 包函数。
+R 函数的设计模式和 C++ 中的函数完全不同，即使它们都叫做 `gwr_basic`。
+在 R 中，主要的目标是*设计风格统一以及方便使用的用户接口*，
+不仅包内部要统一，也要符合 R 用户的习惯。
+设计时主要遵循以下原则：
+
+- 尽可能减少必选参数的个数，通常只留一个 `formula` 和一个 `data`。
+- 必选参数放在可选参数之前，常用的可选参数放在不常用的可选参数之前。
+- 可选参数尽量保持正交，尽可能避免多个参数控制一个行为；如果无法避免，这些参数应有相同的前缀。
+- 可选参数默认值的设置应使用户在不设置可选参数时得到正确且最优的结果。
+- 如果可能，不要使用 `list` 作为参数值，而是使用 `S4` 类型。
+
+函数 `gwr_basic` 的声明为
+
+```R
+gwr_basic <- function(
+    formula,
+    data,
+    bw = NA,
+    adaptive = FALSE,
+    kernel = c("gaussian", "exp", "bisquare", "tricube", "boxcar"),
+    longlat = FALSE,
+    p = 2.0,
+    theta = 0.0,
+    hatmatrix = TRUE,
+    parallel_method = c("no", "omp"),
+    parallel_arg = c(0)
+)
+```
+
+下面逐步分析该函数是如何实现的。
+
+### 参数解析
+
+该部分比较复杂，涉及多个部分，但写出来的代码整体是差不多的。
+
+枚举列表的转换
+:   枚举列表是指以一系列枚举名作为默认值的参数，典型的如 `kernel = c("gaussian", "exp", "bisquare", "tricube", "boxcar")`。
+    通常需要使用 `match.arg()` 函数将输入的参数与默认值列表进行匹配，得到最终值。
+
+自变量、因变量的提取
+:   自变量和因变量是用过 `formula` 指定的，但是其值存储在 `data` 中，需要从中提取出来存储为矩阵。
+    该部分的代码通常为
+
+    ```r
+    mc <- match.call(expand.dots = FALSE)
+    mt <- match(c("formula", "data"), names(mc), 0L)
+    mf <- mc[c(1L, mt)]
+    mf$drop.unused.levels <- TRUE
+    mf[[1L]] <- as.name("model.frame")
+    mf <- eval(mf, parent.frame())
+    mt <- attr(mf, "terms")
+    y <- model.extract(mf, "response")
+    x <- model.matrix(mt, mf)
+    dep_var <- as.character(attr(terms(formula(formula)), "variables")[[2]])
+    has_intercept <- attr(terms(mf), "intercept") == 1
+    indep_vars <- colnames(x)
+    indep_vars[which(indep_vars == "(Intercept)")] <- "Intercept"
+    colnames(x) <- indep_vars
+    if (has_intercept && indep_vars[1] != "Intercept") {
+        stop("Please put Intercept to the first column.")
+    }
+    ```
+
+坐标提取
+:   由于 `data` 对象的类型是 `sf` ，我们只需要各个要素的（重心）坐标，使用下面的代码提取
+
+    ```r
+    coords <- as.matrix(sf::st_coordinates(sf::st_centroid(data)))
+    if (is.null(coords) || nrow(coords) != nrow(data))
+        stop("Missing coordinates.")
+    ```
+
+
+带宽处理
+:   参数 `bw` 支持数值型和字符型。如果 `bw` 是数值型，则认为用户已经指定了带宽值。
+    如果是字符型，则认为用户需要优选带宽，该值表示优选带宽时所用的指标值。
+    因此该参数将被解析为三个参数：`bw` `optim_bw` `optim_bw_criterion`，
+    分别表示带宽值、是否优选带宽、带宽优选指标。
+
+    ```r
+    if (missing(bw)) {
+        optim_bw <- TRUE
+        optim_bw_criterion <- "AIC"
+        bw <- Inf
+    } else if (is.numeric(bw) || is.integer(bw)) {
+        optim_bw <- FALSE
+        optim_bw_criterion <- "AIC"
+    } else {
+        optim_bw <- TRUE
+        optim_bw_criterion <-
+            ifelse(is.character(bw), match.arg(bw, c("CV", "AIC")), "AIC")
+        bw <- Inf
+    }
+    ```
+
+以上就是所有参数解析的过程，开发时需要酌情处理。
+
+### 调用 C++ 代码
+
+在该函数中，实际上是通过调用 `RcppExports.R` 中提供的函数调用 C++ 函数，我们姑且将这些函数称为“内部 R 接口”。
+在 `RcppExports.R` 中可以看到通过 `[[Rcpp::export]]` 声明的每个 C++ 函数都由一个对应的同名同参的 R 函数，
+这个函数就是我们在用户接口中可以使用的函数。
+
+```R
+c_result <- gwr_basic_fit(
+    x, y, coords, bw, adaptive, enum(kernel), longlat, p, theta,
+    hatmatrix, has_intercept,
+    enum_list(parallel_method, parallel_types), parallel_arg,
+    optim_bw, enum(optim_bw_criterion, c("AIC", "CV")),
+    select_model = FALSE, select_model_criterion = 0,
+    select_model_threshold = 3.0
+)
+```
+
+::: callout-note
+这里使用了大量的 `enum` 开头的函数，主要作用是将枚举名转换为数值，使其能在 C++ 中使用。
+由于我们的 C++ 函数中是不接受字符型的变量，而且在 C++ 中处理字符串比较麻烦，
+这个工作就在 R 中完成。
+:::
+
+得到返回值后，为了方便使用，我们需要对返回值进行进一步的处理。
+例如，如果需要带宽优选，那么带宽值很可能已经发生了变化，需要从结果中提取新的带宽值。
+
+```r
+if (optim_bw)
+    bw <- c_result$bandwidth
+betas <- c_result$betas
+betas_se <- c_result$betasSE
+shat_trace <- c_result$sTrace
+fitted <- c_result$fitted
+diagnostic <- c_result$diagnostic
+resi <- y - fitted
+n_dp <- nrow(coords)
+rss_gw <- sum(resi * resi)
+sigma <- rss_gw / (n_dp - 2 * shat_trace[1] + shat_trace[2])
+betas_se <- sqrt(sigma * betas_se)
+betas_tv <- betas / betas_se
+```
+
+### 创建结果
+
+根据内部 R 接口的返回值，我们需要将其包装称为用户接口的返回值，以使用 R 中的功能。
+由于该包处理的主要是空间数据，结果也应当是空间数据。
+因此首先创建返回的空间数据，要素仍然是 `data` 的要素，属性表则替换为计算的结果。
+
+```R
+colnames(betas) <- indep_vars
+colnames(betas_se) <- paste(indep_vars, "SE", sep = ".")
+colnames(betas_tv) <- paste(indep_vars, "TV", sep = ".")
+sdf_data <- as.data.frame(cbind(
+    betas,
+    "yhat" = fitted,
+    "residual" = resi,
+    betas_se,
+    betas_tv
+))
+sdf_data$geometry <- sf::st_geometry(data)
+sdf <- sf::st_sf(sdf_data)
+```
+
+之后再进一步构建返回值，为了方便后续开发，通常这里要返回一个 `list` 类型的对象，并为其指定一个类型名，
+即构建一个 S3 对象。
+
+```R
+gwrm <- list(
+    SDF = sdf,
+    diagnostic = diagnostic,
+    args = list(
+        x = x,
+        y = y,
+        coords = coords,
+        bw = bw,
+        adaptive = adaptive,
+        kernel = kernel,
+        longlat = longlat,
+        p = p,
+        theta = theta,
+        hatmatrix = hatmatrix,
+        has_intercept = has_intercept,
+        parallel_method = parallel_method,
+        parallel_arg = parallel_arg,
+        optim_bw = optim_bw,
+        optim_bw_criterion = optim_bw_criterion
+    ),
+    call = mc,
+    indep_vars = indep_vars,
+    dep_var = dep_var
+)
+class(gwrm) <- "gwrm"
+gwrm
+```
+
+该返回值需要满足以下条件
+
+- 有一个名为 `SDF` 的键值对存储空间数据。
+- 有一个名为 `diagnostic` 的键值对保存诊断信息。
+- 由一个名为 `args` 的列表，保存模型拟合的参数，使用该列表，需要可以完全复现模型拟合过程。
+- 保存自变量和因变量。
+
+这样一个用户接口就写完了。
+
+### 撰写文档
+
+在函数名前面，按照 `roxygen2` 的要求，用注释的方式为函数编写文档。
+具体方法请参考相应的专题。
+
+::: callout-important
+对于用户接口函数，一定要在注释中添加 `@export` 指令！
+:::
+
+文档编写完成后，运行下面的 R 代码以生成 Rd 文档文件
+
+```r
+devtools::document()
+```
+
+## 添加 Generic 实现
+
+R 语言使用一种比较特殊的模式，使同一函数作用于不同对象时可以表现出不同的行为，而该函数称为 “Generic” 函数。
+例如，`print()` 函数就是一个 Generic 函数，当参数是 `data.frame` 类型，或者 `list` 类型时，
+该函数在内部分别调用 `print.data.frame()` 和 `print.list()` 。
+为了使我们用户接口的返回值能够在 R 中有更好的表现，我们需要为其 Generic 实现。
+通常应包括：
+
+print
+: 在控制台输出描述信息
+
+coef
+: 获取模型参数
+
+fitted
+: 模型拟合值
+
+residuals
+: 模型残差
+
+summary
+: 模型的描述性总结，通常返回一个 `summary.<模型返回值类名>` 类型的对象，
+  并为该类型添加 `print.summary.<模型返回值类名>` 的 Generic 实现。
+
+plot
+: 根据模型绘图
+
+model_sel
+: 这是本包中自定义了 的 Generic 方法，所有可以进行变量优选的模型，
+  都应该添加该 Generic 实现，以提供模型优选功能。
+
+::: callout-important
+所有的 Generic 实现函数也都应撰写文档，并使用 `@export` 指令导出。
+如果有些 Generic 容易混淆，则应使用 `@method Generic名 Class名` 进行导出，
+例如 `@method print summary.gwrm` 指定方法 `print.summary.gwrm` 是 `summary.gwrm` 类型的 `print` Generic 实现。
+:::
+
+# 测试
+
+代码在提交之前，首先应该进行测试。下面主要介绍测试的方法。
+
+## 单元测试
+
+该包使用 **testthat** 包添加了一些单元测试，在 R 中运行如下代码以运行单元测试
+
+```r
+devtools::test()
+```
+
+在编写了新的模型后，应首先编写对应的测试，确保用户接口可以运行，并可以从 C++ 代码中正确地获取结果。
+由于 C++ 代码已经经过测试，只要输入正确，输出是可以保证的，
+所以 R 包中可以只测试取值是否正确，而无需检查算法实现的正确性。
+
+## 包检查
+
+这里指的是安装 CRAN 的标准对源码包进行检查，检查的对象不止包括代码，还包括文档等辅助文件。
+在 R 中运行如下代码以运行包检查
+
+```r
+devtools::check(build_args = c("--resave-data"))
+```
+
+也可以不传参数，但是会多出一个相应的警告。如果只是在本地检查，则可以忽略。
+
+## 持续测试
+
+本地检查通过后，提交代码，并推送到远程仓库，在 GitHub 上创建一个目标为 `master` 分支的合并请求 (Pull Request, PR)。
+创建后，会自动开始运行流水线，在 CRAN 要求的系统平台上进行包检查。
+检查的结果可以在 PR 页面看到，也可以在 [Actions](https://github.com/GWmodel-Lab/GWmodel3/actions) 页面看到。
+
+![GitHub Actions: Workflow Page](/assets/img/github-actions-workflows-status.png)
+
+------
+
+以上就是 **GWmodel3** 包开发的基本流程，欢迎大家贡献代码。
