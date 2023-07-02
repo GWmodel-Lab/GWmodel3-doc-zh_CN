@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: ghcr.io/gwmodel-lab/gwmodel3-test-ubuntu:latest
+      image: ghcr.io/gwmodel-lab/gwmodel3-test-debian-release:latest
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
