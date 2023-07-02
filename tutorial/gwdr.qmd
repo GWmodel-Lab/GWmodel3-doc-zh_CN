@@ -120,8 +120,8 @@ m2 <- gwdr(
 m3 <- gwdr(
  formula = PURCHASE ~ FLOORSZ + UNEMPLOY + PROF,
  data = LondonHP,
- config = list(gwdr_config(bw = 0.2, kernel = "bisquare"),
-               gwdr_config(bw = 0.2, kernel = "bisquare"))
+ config = list(gwdr_config(bw = 0.5, kernel = "bisquare"),
+               gwdr_config(bw = 0.5, kernel = "bisquare"))
 )
 m3
 ```
