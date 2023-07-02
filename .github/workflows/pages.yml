@@ -38,7 +38,7 @@ jobs:
         with:
           repository: 'GWmodel-Lab/GWmodel3'
           path: 'GWmodel3'
-          submodules: true
+          submodules: recursive
       
       # Install GWmodel3
       - name: Install GWmodel3
