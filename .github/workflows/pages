@@ -1,0 +1,75 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Deploy static content to Pages
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # Build quarto doc
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    container:
+      image: ghcr.io/gwmodel-lab/gwmodel3-test-ubuntu:latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+
+      # Download GWmodel3 source code
+      - name: Download GWmodel3
+        uses: actions/checkout@v3
+        with:
+          repository: 'GWmodel-Lab/GWmodel3'
+          path: 'GWmodel3'
+          submodules: true
+      
+      # Install GWmodel3
+      - name: Install GWmodel3
+        run: R CMD INSTALL GWmodel3
+
+      # Set up quarto
+      - name: Set up quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      # Render quarto website
+      - name: Render quarto website
+        run: quarto render
+
+      # Upload to artifact
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: '_site'
+
+  deploy:
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+      
+    
